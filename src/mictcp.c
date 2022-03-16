@@ -1,6 +1,57 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
+
+typedef struct liste_sock_addr{
+    mic_tcp_sock sock_local;
+    mic_tcp_sock_addr addr_distante;
+    struct liste_sock_addr * suivant;
+}liste_sock_addr;
+
+liste_sock_addr debut;
+liste_sock_addr * liste_socket_addresses = &debut;
+liste_sock_addr * pointeur_courant = NULL;
+
+void fd_to_pointeur(int fd,liste_sock_addr * pointeur_liste_socket){
+    debut.suivant = NULL;
+    if  (pointeur_liste_socket->suivant ==NULL){
+        pointeur_courant = NULL;
+    }
+    else{
+        if (((pointeur_liste_socket->sock_local).fd) == fd){
+            pointeur_courant = pointeur_liste_socket;
+        }
+        else{
+            fd_to_pointeur(fd, pointeur_liste_socket->suivant);
+        }
+    }
+}
+
+void parcours_liste(liste_sock_addr * pointeur_liste_socket){
+    debut.suivant = NULL;
+    if  (pointeur_liste_socket->suivant ==NULL){
+        printf("fin liste\n");
+    }
+    else{
+            printf("num socket: %d\n",(pointeur_liste_socket->sock_local).fd);
+            parcours_liste(pointeur_liste_socket->suivant);
+        }
+}
+
+int add_sock_list(int num, liste_sock_addr * pointeur_liste_socket){
+    if (pointeur_liste_socket->suivant == NULL){
+        pointeur_liste_socket->suivant = malloc(sizeof(liste_sock_addr));
+        ((pointeur_liste_socket->suivant)->sock_local).fd = num;
+        ((pointeur_liste_socket->suivant)->sock_local).state = CLOSED;
+        (pointeur_liste_socket->suivant)->suivant = NULL;
+        return num;
+    }
+    else{
+        add_sock_list(num+1, pointeur_liste_socket->suivant);
+    }
+    return -1;
+}
+
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
  * Retourne le descripteur du socket ou bien -1 en cas d'erreur
@@ -10,8 +61,11 @@ int mic_tcp_socket(start_mode sm)
    int result = -1;
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
    result = initialize_components(sm); /* Appel obligatoire */
+   if (result ==-1){
+       return -1;
+   }
    set_loss_rate(0);
-
+   result = add_sock_list(0,liste_socket_addresses);
    return result;
 }
 
@@ -22,27 +76,52 @@ int mic_tcp_socket(start_mode sm)
 int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 {
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-   return -1;
+   fd_to_pointeur(socket,liste_socket_addresses);
+   if (pointeur_courant == NULL){
+       printf("erreur bind\n");
+       printf("SOCKET CHERCHE  %d\n", socket);
+       parcours_liste(liste_socket_addresses);
+       return -1;
+   }
+   (pointeur_courant->sock_local).addr = addr;
+   return 0;
 }
 
 /*
  * Met le socket en état d'acceptation de connexions
  * Retourne 0 si succès, -1 si erreur
  */
+
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    return -1;
+    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
+    fd_to_pointeur(socket,liste_socket_addresses);
+    if (pointeur_courant == NULL){
+       printf("erreur connexion\n");
+       return -1;
+    }
+    (pointeur_courant->addr_distante) = *addr;
+    (pointeur_courant -> sock_local).state = ESTABLISHED;
+    return 0;
 }
 
 /*
  * Permet de réclamer l’établissement d’une connexion
  * Retourne 0 si la connexion est établie, et -1 en cas d’échec
  */
+
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    return -1;
+    fd_to_pointeur(socket,liste_socket_addresses);
+    if (pointeur_courant == NULL){
+       printf("erreur connexion\n");
+       return -1;
+    }
+    (pointeur_courant->addr_distante) = addr;
+    (pointeur_courant -> sock_local).state = ESTABLISHED;
+    return 0;
 }
 
 /*
@@ -52,7 +131,40 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    /* create pdu*/
+    mic_tcp_pdu pdu;
+    mic_tcp_header header;
+    fd_to_pointeur(mic_sock,liste_socket_addresses);
+    if (pointeur_courant == NULL){
+       printf("erreur send\n");
+       return -1;
+    }
+    header.source_port = (pointeur_courant->addr_distante).port; /* numéro de port source */
+    /*on a les infos du connect
+
+    connect -> dest_port;
+    connect -> addr_dest;
+
+    seq_num; numéro de séquence 
+    ack_num; numéro d'acquittement 
+    syn; flag SYN (valeur 1 si activé et 0 si non) 
+    ack; flag ACK (valeur 1 si activé et 0 si non) 
+    fin; flag FIN (valeur 1 si activé et 0 si non) 
+    */
+    /**/
+    mic_tcp_payload payload;
+    payload.data = mesg;
+    payload.size= mesg_size;
+    /**/
+    pdu.payload = payload;
+    pdu.header = header;
+    /**/
+    int nb_envoye;
+    if ((nb_envoye = IP_send(pdu, (pointeur_courant->addr_distante)))==-1){
+        printf("erreur envoi\n");
+        exit(1);
+    }
+    return nb_envoye;
 }
 
 /*
@@ -64,7 +176,12 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    mic_tcp_payload payload;
+    payload.data = mesg;
+    payload.size = max_mesg_size;
+    int taille_recue;
+    taille_recue = app_buffer_get(payload);
+    return taille_recue;
 }
 
 /*
@@ -75,7 +192,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 int mic_tcp_close (int socket)
 {
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    return 0;
 }
 
 /*
@@ -87,4 +204,5 @@ int mic_tcp_close (int socket)
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+    app_buffer_put(pdu.payload);
 }
