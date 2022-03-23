@@ -1,10 +1,13 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
+#define nb_envois_max 10
+
 
 typedef struct liste_sock_addr{
     mic_tcp_sock sock_local;
     mic_tcp_sock_addr addr_distante;
+    int pe_a;
     struct liste_sock_addr * suivant;
 }liste_sock_addr;
 
@@ -103,6 +106,20 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
        return -1;
     }
     (pointeur_courant->addr_distante) = *addr;
+    int j = 0;
+    mic_tcp_pdu synack;
+    j = IP_recv(&synack, addr, 4);
+    if ((j== -1) || (&synack.header.syn != 1)) {
+        printf("connexion non détectée\n");
+        exit(1);
+    }
+    int i=-1;
+    synack.header.
+    while (i==-1){
+        IP_send(SYNACK,@dest)
+        i = IP_recv(ACK, @emetteur, timeout)
+    }   
+    (pointeur_courant -> pe_a)=0;
     (pointeur_courant -> sock_local).state = ESTABLISHED;
     return 0;
 }
@@ -121,6 +138,32 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
        return -1;
     }
     (pointeur_courant->addr_distante) = addr;
+    int i=-1;
+    mic_tcp_header header_syn;
+    header_syn.syn = 1;
+    header_syn.source_port = (pointeur_courant->sock_local).addr.port;
+    header_syn.dest_port = (pointeur_courant->addr_distante).port;
+    mic_tcp_pdu syn;
+    syn.header=header_syn;
+    mic_tcp_pdu synack;
+    int nb_envois = 0;
+    while (i==-1){
+        IP_send(syn,addr);
+        nb_envois ++;
+        i = IP_recv(&synack, &addr, 4);
+        if (i!=-1){
+            if ((&synack.header.ack != 1) || (&synack.header.syn !=1)){
+                i == -1;
+            }
+        }
+        if (nb_envois > nb_envois_max){
+            printf("erreur trop d'envois avec échec \n");
+            return -1;
+        }
+    }
+    syn.header.ack = 1;
+    IP_send(syn,addr);
+    (pointeur_courant -> pe_a)=0;
     (pointeur_courant -> sock_local).state = ESTABLISHED;
     return 0;
 }
