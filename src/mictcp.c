@@ -260,6 +260,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
     int taille_recue;
     taille_recue = app_buffer_get(payload);
     return taille_recue;
+
 }
 
 /*
@@ -282,5 +283,21 @@ int mic_tcp_close (int socket)
 void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    app_buffer_put(pdu.payload);
+    /* ici int fd =0 pour l'instant*/
+    fd_to_pointeur(0,&liste_socket_addresses);
+    mic_tcp_pdu ack;
+    if ((pointeur_courant->pe_a == pdu.header.seq_num)){
+        //c'est bon
+        //envoi ACK
+        ack.header.ack = pointeur_courant->pe_a;
+        //nouveau pa
+        pointeur_courant->pe_a = 1 -(pointeur_courant->pe_a);
+        IP_send(ack,pointeur_courant->addr_distante);
+        app_buffer_put(pdu.payload);
+    }
+    else{
+        //envoi de l'ancien pdu
+        ack.header.ack = 1 - pointeur_courant->pe_a;
+        IP_send(ack,pointeur_courant->addr_distante);
+    }
 }
