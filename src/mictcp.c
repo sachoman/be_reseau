@@ -196,6 +196,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
        printf("erreur send\n");
        return -1;
     }
+    header.seq_num = (pointeur_courant -> pe_a);
     header.source_port = (pointeur_courant->addr_distante).port; /* numéro de port source */
     /*on a les infos du connect
 
@@ -216,11 +217,31 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     pdu.payload = payload;
     pdu.header = header;
     /**/
+    mic_tcp_pdu ack;
     int nb_envoye;
-    if ((nb_envoye = IP_send(pdu, (pointeur_courant->addr_distante)))==-1){
-        printf("erreur envoi\n");
-        exit(1);
+    int i = -1;
+    int j ;
+    int nb_envois = 0;
+    while(i==-1){
+        if (nb_envois > nb_envois_max){
+            printf("erreur trop d'envois avec échec \n");
+            exit(1);
+        }
+        if ((nb_envoye = IP_send(pdu, (pointeur_courant->addr_distante)))==-1){
+            printf("erreur envoi\n");
+            exit(1);
+        }
+        nb_envois++;
+        j = IP_recv(ack,(pointeur_courant->addr_distante),4);
+        if (j==-1){
+            printf("ACK non reçu, réenvoi des données\n");
+        }else{
+            if((ack.header.ack == '1')&&(ack.header.ack_num = pointeur_courant.pe_a)){
+                i=-1;
+            }
+        }
     }
+    (pointeur_courant -> pe_a) = 1-(pointeur_courant -> pe_a);
     return nb_envoye;
 }
 
