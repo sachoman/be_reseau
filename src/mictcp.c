@@ -1,8 +1,9 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
-#define nb_envois_max 10000
+#define nb_envois_max 100
 
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct liste_sock_addr{
     mic_tcp_sock sock_local;
@@ -12,9 +13,9 @@ typedef struct liste_sock_addr{
 }liste_sock_addr;
 
 liste_sock_addr * liste_socket_addresses = NULL;
-liste_sock_addr * pointeur_courant = NULL;
 
-void fd_to_pointeur(int fd,liste_sock_addr ** pointeur_liste_socket){
+liste_sock_addr * fd_to_pointeur(int fd,liste_sock_addr ** pointeur_liste_socket){
+    liste_sock_addr * pointeur_courant = NULL;
     if  ((*pointeur_liste_socket) == NULL){
         pointeur_courant = NULL;
     }
@@ -23,9 +24,10 @@ void fd_to_pointeur(int fd,liste_sock_addr ** pointeur_liste_socket){
             pointeur_courant = (*pointeur_liste_socket);
         }
         else{
-            fd_to_pointeur(fd, &((*pointeur_liste_socket)->suivant));
+            pointeur_courant = fd_to_pointeur(fd, &((*pointeur_liste_socket)->suivant));
         }
     }
+    return pointeur_courant;
 }
 
 void parcours_liste(liste_sock_addr * pointeur_liste_socket){
@@ -69,7 +71,15 @@ int mic_tcp_socket(start_mode sm)
        return -1;
    }
    set_loss_rate(30);
+   if (pthread_mutex_lock(&mutex)){
+       printf("erreu lock\n ");
+       exit(1);
+   }
    result = add_sock_list(0,&liste_socket_addresses);
+   if (pthread_mutex_unlock(&mutex)){
+       printf("erreu unlock\n ");
+       exit(1);
+   }
    return result;
 }
 
@@ -80,7 +90,7 @@ int mic_tcp_socket(start_mode sm)
 int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 {
    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-   fd_to_pointeur(socket,&liste_socket_addresses);
+   liste_sock_addr * pointeur_courant = fd_to_pointeur(socket,&liste_socket_addresses);
    if (pointeur_courant == NULL){
        printf("erreur bind\n");
        printf("SOCKET CHERCHE  %d\n", socket);
@@ -100,7 +110,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    fd_to_pointeur(socket,&liste_socket_addresses);
+    liste_sock_addr * pointeur_courant = fd_to_pointeur(socket,&liste_socket_addresses);
     if (pointeur_courant == NULL){
        printf("erreur connexion\n");
        return -1;
@@ -158,7 +168,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    fd_to_pointeur(socket,&liste_socket_addresses);
+    liste_sock_addr * pointeur_courant = fd_to_pointeur(socket,&liste_socket_addresses);
     if (pointeur_courant == NULL){
        printf("erreur connexion\n");
        return -1;
@@ -206,7 +216,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     /* create pdu*/
     mic_tcp_pdu pdu;
     mic_tcp_header header;
-    fd_to_pointeur(mic_sock,&liste_socket_addresses);
+    liste_sock_addr * pointeur_courant = fd_to_pointeur(mic_sock,&liste_socket_addresses);
     if (pointeur_courant == NULL){
        printf("erreur send\n");
        return -1;
@@ -249,7 +259,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             exit(1);
         }
         nb_envois++;
-        j = IP_recv(&ack,&(pointeur_courant->addr_distante),8);
+        j = IP_recv(&ack,&(pointeur_courant->addr_distante),10);
         printf("taille : %d\n", j);
         if (j==-1){
             printf("ACK non reçu, réenvoi des données\n");
@@ -306,7 +316,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     /* ici int fd =0 pour l'instant*/
-    fd_to_pointeur(0,&liste_socket_addresses);
+    liste_sock_addr * pointeur_courant = fd_to_pointeur(0,&liste_socket_addresses);
     mic_tcp_pdu ack;
 
     if ((pointeur_courant->pe_a == pdu.header.seq_num)){
