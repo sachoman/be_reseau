@@ -1,16 +1,20 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
-#define nb_envois_max 100
-
+#define nb_envois_max 15
+#define fiabilite_definie 4
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct liste_sock_addr{
     mic_tcp_sock sock_local;
     mic_tcp_sock_addr addr_distante;
     int pe_a;
+    int fiabilite;
+    int tab_pertes[10];
+    int index;
     struct liste_sock_addr * suivant;
 }liste_sock_addr;
+
 
 liste_sock_addr * liste_socket_addresses = NULL;
 
@@ -29,6 +33,21 @@ liste_sock_addr * fd_to_pointeur(int fd,liste_sock_addr ** pointeur_liste_socket
     }
     return pointeur_courant;
 }
+int nb_pertes(int fd){
+    liste_sock_addr * pointeur_courant = fd_to_pointeur(fd,&liste_socket_addresses);
+    int cmpt = 0;
+    for (int i=0; i<10;i++){
+        cmpt += pointeur_courant->tab_pertes[i];
+    }
+    return cmpt;
+}
+
+int doit_renvoyer(int fd){
+    liste_sock_addr * pointeur_courant = fd_to_pointeur(fd,&liste_socket_addresses);
+    printf("NB PERTES FD %d\n",nb_pertes(fd));
+    int bool = (nb_pertes(fd) == pointeur_courant->fiabilite);
+    return bool;
+}
 
 void parcours_liste(liste_sock_addr * pointeur_liste_socket){
     if  (pointeur_liste_socket->suivant ==NULL){
@@ -46,6 +65,11 @@ int add_sock_list(int num, liste_sock_addr ** pointeur_liste_socket){
         printf("num %d\n ",num);
         (*pointeur_liste_socket) = malloc(sizeof(liste_sock_addr));
         //printf("attribution %d\n",*pointeur_liste_socket);
+        (*pointeur_liste_socket)->fiabilite = fiabilite_definie;
+        (*pointeur_liste_socket)->index = 0;
+        for (int i =0; i<10;i++){
+            (*pointeur_liste_socket)->tab_pertes[i]=0;
+        }
         ((*pointeur_liste_socket)->sock_local).fd = num;
         ((*pointeur_liste_socket)->sock_local).state = CLOSED;
         (*pointeur_liste_socket)->suivant = NULL;
@@ -71,7 +95,7 @@ int mic_tcp_socket(start_mode sm)
    if (result ==-1){
        return -1;
    }
-   set_loss_rate(30);
+   set_loss_rate(5);
    if (pthread_mutex_lock(&mutex)){
        printf("erreu lock\n ");
        exit(1);
@@ -254,7 +278,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     while(i==-1){
         if (nb_envois > nb_envois_max){
             printf("erreur trop d'envois avec échec \n");
-            exit(1);
+            exit(-1);
         }
         printf("on va envoyer\n");
         if ((nb_envoye = IP_send(pdu, (pointeur_courant->addr_distante)))==-1){
@@ -262,21 +286,37 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             exit(1);
         }
         nb_envois++;
-        j = IP_recv(&ack,&(pointeur_courant->addr_distante),10);
+        j = IP_recv(&ack,&(pointeur_courant->addr_distante),80);
         printf("taille : %d\n", j);
+        /*printf("ack 1 ? : %c\n",ack.header.ack);
+        printf("n0 seq recu : %d\n",ack.header.ack_num);
+        printf("n0 seq attendu : %d\n",pointeur_courant->pe_a);*/
         if (j==-1){
-            printf("ACK non reçu, réenvoi des données\n");
+            if (doit_renvoyer(mic_sock)){
+                printf("limite pertes atteinte, renvoi exigé \n");
+            }
+            else{
+                printf("paquet perdu on passe au suivant \n");
+                pointeur_courant->tab_pertes[(pointeur_courant->index)]=1;
+                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%10;
+                i=0;
+            }
         }
         else{
             printf("ack 1 ? : %c\n",ack.header.ack);
             printf("n0 seq recu : %d\n",ack.header.ack_num);
             printf("n0 seq attendu : %d\n",pointeur_courant->pe_a);
             if((ack.header.ack == '1')&&(ack.header.ack_num == pointeur_courant->pe_a)){
+                pointeur_courant->tab_pertes[(pointeur_courant->index)]=0;
+                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%10;
                 i=0;
+                (pointeur_courant -> pe_a) = (1+(pointeur_courant -> pe_a)) % 3;
+            }
+            else{
+                printf("paquet non attendu recu \n");
             }
         }
     }
-    (pointeur_courant -> pe_a) = 1-(pointeur_courant -> pe_a);
     return nb_envoye;
 }
 
@@ -333,20 +373,38 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
             ack.payload.data = NULL; 
             ack.payload.size = 0; 
             //nouveau pa
-            pointeur_courant->pe_a = 1 -(pointeur_courant->pe_a);
+            pointeur_courant->pe_a = (1 + (pointeur_courant->pe_a)) % 3;
             IP_send(ack,pointeur_courant->addr_distante);
             app_buffer_put(pdu.payload);
         }
-        else{
-            //envoi de l'ancien pdu
+        else {
+            if ((pointeur_courant->pe_a -1) %3 == pdu.header.seq_num){
+                //envoi de l'ancien pdu
+                ack.header.ack ='1';
+                ack.header.syn = '0';
+                ack.header.ack_num = (pointeur_courant->pe_a - 1)%3;
+                printf("envoi ancien ack %d\n",ack.header.ack_num);
+                ack.header.source_port = pointeur_courant->sock_local.addr.port;
+                ack.header.dest_port = pointeur_courant->addr_distante.port;
+                ack.payload.data = NULL; 
+                ack.payload.size = 0;
+                IP_send(ack,pointeur_courant->addr_distante);
+            }
+            else {
+                //c'est bon
+            //envoi ACK
+            printf("on SAUTE\n");
             ack.header.ack ='1';
             ack.header.syn = '0';
-            ack.header.ack_num = 1 - pointeur_courant->pe_a;
-            printf("envoi ancien ack %d\n",ack.header.ack_num);
+            ack.header.ack_num = pdu.header.seq_num;
             ack.header.source_port = pointeur_courant->sock_local.addr.port;
             ack.header.dest_port = pointeur_courant->addr_distante.port;
             ack.payload.data = NULL; 
-            ack.payload.size = 0;
+            ack.payload.size = 0; 
+            //nouveau pa
+            pointeur_courant->pe_a = (2 + (pointeur_courant->pe_a)) % 3;
             IP_send(ack,pointeur_courant->addr_distante);
+            app_buffer_put(pdu.payload);
+            }
         }
 }
