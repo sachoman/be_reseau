@@ -49,6 +49,7 @@ int add_sock_list(int num, liste_sock_addr ** pointeur_liste_socket){
         ((*pointeur_liste_socket)->sock_local).fd = num;
         ((*pointeur_liste_socket)->sock_local).state = CLOSED;
         (*pointeur_liste_socket)->suivant = NULL;
+        printf("mon num socket : %d\n ",num);
         return num;
     }
     else{
@@ -224,6 +225,8 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     header.seq_num = (pointeur_courant -> pe_a);
     header.source_port = (pointeur_courant->sock_local.addr).port; /* numéro de port source */
     header.dest_port = (pointeur_courant->addr_distante).port;
+    header.syn = '0';
+    header.ack = '0';
     /*on a les infos du connect
 
     connect -> dest_port;
@@ -318,31 +321,32 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     /* ici int fd =0 pour l'instant*/
     liste_sock_addr * pointeur_courant = fd_to_pointeur(0,&liste_socket_addresses);
     mic_tcp_pdu ack;
-
-    if ((pointeur_courant->pe_a == pdu.header.seq_num)){
-        //c'est bon
-        //envoi ACK
-        printf("on envoi un ack avec message correct\n");
-        ack.header.ack ='1';
-        ack.header.ack_num = pointeur_courant->pe_a;
-        ack.header.source_port = pointeur_courant->sock_local.addr.port;
-        ack.header.dest_port = pointeur_courant->addr_distante.port;
-        ack.payload.data = NULL; 
-        ack.payload.size = 0; 
-        //nouveau pa
-        pointeur_courant->pe_a = 1 -(pointeur_courant->pe_a);
-        IP_send(ack,pointeur_courant->addr_distante);
-        app_buffer_put(pdu.payload);
-    }
-    else{
-        //envoi de l'ancien pdu
-        ack.header.ack ='1';
-        ack.header.ack_num = 1 - pointeur_courant->pe_a;
-        printf("envoi ancien ack %d\n",ack.header.ack_num);
-        ack.header.source_port = pointeur_courant->sock_local.addr.port;
-        ack.header.dest_port = pointeur_courant->addr_distante.port;
-        ack.payload.data = NULL; 
-        ack.payload.size = 0;
-        IP_send(ack,pointeur_courant->addr_distante);
-    }
+        if ((pointeur_courant->pe_a == pdu.header.seq_num)){
+            //c'est bon
+            //envoi ACK
+            printf("on envoi un ack avec message correct\n");
+            ack.header.ack ='1';
+            ack.header.syn = '0';
+            ack.header.ack_num = pointeur_courant->pe_a;
+            ack.header.source_port = pointeur_courant->sock_local.addr.port;
+            ack.header.dest_port = pointeur_courant->addr_distante.port;
+            ack.payload.data = NULL; 
+            ack.payload.size = 0; 
+            //nouveau pa
+            pointeur_courant->pe_a = 1 -(pointeur_courant->pe_a);
+            IP_send(ack,pointeur_courant->addr_distante);
+            app_buffer_put(pdu.payload);
+        }
+        else{
+            //envoi de l'ancien pdu
+            ack.header.ack ='1';
+            ack.header.syn = '0';
+            ack.header.ack_num = 1 - pointeur_courant->pe_a;
+            printf("envoi ancien ack %d\n",ack.header.ack_num);
+            ack.header.source_port = pointeur_courant->sock_local.addr.port;
+            ack.header.dest_port = pointeur_courant->addr_distante.port;
+            ack.payload.data = NULL; 
+            ack.payload.size = 0;
+            IP_send(ack,pointeur_courant->addr_distante);
+        }
 }

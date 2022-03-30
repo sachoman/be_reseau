@@ -155,6 +155,7 @@ int IP_recv(mic_tcp_pdu* pk, mic_tcp_sock_addr* addr, unsigned long timeout)
         }
 
         /* Correct the receved size */
+        printf("addr : %s\n ", addr->ip_addr);
         result -= API_HD_Size;
     }
 
