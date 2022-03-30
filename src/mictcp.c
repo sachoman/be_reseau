@@ -2,7 +2,8 @@
 #include <api/mictcp_core.h>
 
 #define nb_envois_max 15
-#define fiabilite_definie 4
+#define fiabilite_definie 1
+#define index_tab 1000
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct liste_sock_addr{
@@ -10,7 +11,7 @@ typedef struct liste_sock_addr{
     mic_tcp_sock_addr addr_distante;
     int pe_a;
     int fiabilite;
-    int tab_pertes[10];
+    int tab_pertes[index_tab];
     int index;
     struct liste_sock_addr * suivant;
 }liste_sock_addr;
@@ -36,7 +37,7 @@ liste_sock_addr * fd_to_pointeur(int fd,liste_sock_addr ** pointeur_liste_socket
 int nb_pertes(int fd){
     liste_sock_addr * pointeur_courant = fd_to_pointeur(fd,&liste_socket_addresses);
     int cmpt = 0;
-    for (int i=0; i<10;i++){
+    for (int i=0; i<index_tab;i++){
         cmpt += pointeur_courant->tab_pertes[i];
     }
     return cmpt;
@@ -67,7 +68,7 @@ int add_sock_list(int num, liste_sock_addr ** pointeur_liste_socket){
         //printf("attribution %d\n",*pointeur_liste_socket);
         (*pointeur_liste_socket)->fiabilite = fiabilite_definie;
         (*pointeur_liste_socket)->index = 0;
-        for (int i =0; i<10;i++){
+        for (int i =0; i<index_tab;i++){
             (*pointeur_liste_socket)->tab_pertes[i]=0;
         }
         ((*pointeur_liste_socket)->sock_local).fd = num;
@@ -95,7 +96,7 @@ int mic_tcp_socket(start_mode sm)
    if (result ==-1){
        return -1;
    }
-   set_loss_rate(5);
+   set_loss_rate(1);
    if (pthread_mutex_lock(&mutex)){
        printf("erreu lock\n ");
        exit(1);
@@ -298,7 +299,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             else{
                 printf("paquet perdu on passe au suivant \n");
                 pointeur_courant->tab_pertes[(pointeur_courant->index)]=1;
-                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%10;
+                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%index_tab;
                 i=0;
             }
         }
@@ -308,7 +309,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             printf("n0 seq attendu : %d\n",pointeur_courant->pe_a);
             if((ack.header.ack == '1')&&(ack.header.ack_num == pointeur_courant->pe_a)){
                 pointeur_courant->tab_pertes[(pointeur_courant->index)]=0;
-                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%10;
+                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%index_tab;
                 i=0;
                 (pointeur_courant -> pe_a) = (1+(pointeur_courant -> pe_a)) % 3;
             }
