@@ -1,10 +1,16 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
+#include <pthread.h>
 
-#define nb_envois_max 15
-#define fiabilite_definie 2
-#define index_tab 10
+#define nb_envois_max 100
+#define fiabilite_emetteur 5
+#define fiabilite_recepteur 2
+
+int fiabilite_definie;
+#define index_tab 100
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_cond_t etablissement_connexion;
 
 typedef struct liste_sock_addr{
     mic_tcp_sock sock_local;
@@ -80,7 +86,7 @@ int add_sock_list(int num, liste_sock_addr ** pointeur_liste_socket){
         //printf("else %d\n",*pointeur_liste_socket);
         add_sock_list(num+1, &((*pointeur_liste_socket)->suivant));
     }
-    return -1;
+    return -1;;
 }
 
 /*
@@ -95,7 +101,7 @@ int mic_tcp_socket(start_mode sm)
    if (result ==-1){
        return -1;
    }
-   set_loss_rate(50);
+   set_loss_rate(80);
    if (pthread_mutex_lock(&mutex)){
        printf("erreu lock\n ");
        exit(1);
@@ -134,52 +140,17 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
-    printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     liste_sock_addr * pointeur_courant = fd_to_pointeur(socket,&liste_socket_addresses);
     if (pointeur_courant == NULL){
        printf("erreur connexion\n");
        return -1;
     }
     (pointeur_courant->addr_distante) = *addr;
-    /*
-    int j = 0;
-    mic_tcp_pdu synack;
-    int i=-1;
-    int nb_envois = 0;
-    while (i==-1){
-        if (nb_envois > nb_envois_max){
-            printf("erreur trop d'envois avec échec \n");
-            exit(1);
-        }
-        j = IP_recv(&synack, addr, 1000);
-        nb_envois++;
-        if ((synack.header).syn == '1') {
-            i=0;
-        }
-    }
-    synack.header.syn = '1';
-    synack.header.ack = '1';
-    synack.payload.data = NULL;
-    synack.payload.size = 0;
-    synack.header.source_port) % 3
-    i = -1;
-    nb_envois = 0;
-    while (i==-1){
-        if (nb_envois > nb_envois_max){
-            printf("erreur trop d'envois avec échec \n");
-            exit(1);
-        }
-        IP_send(synack,*addr);
-        nb_envois ++;
-        i = IP_recv(&ack, addr, 1000);
-        if ((ack.header).ack =='0'){
-            i = -1;
-        }
-    }
-    printf("connexion acceptée\n") ;
-    */ 
-    (pointeur_courant -> pe_a)=0;
+    //endormissement
+    int j = pthread_cond_wait(&etablissement_connexion, &mutex);
+    j = pthread_mutex_unlock(&mutex);
     (pointeur_courant -> sock_local).state = ESTABLISHED;
+    (pointeur_courant -> pe_a)=0;
     return 0;
 }
 
@@ -197,33 +168,38 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
        return -1;
     }
     (pointeur_courant->addr_distante) = addr;
-    /*
+    //debut
     int i=-1;
-    mic_tcp_pdu syn;
+    mic_tcp_pdu syn={0};
     syn.header.syn ='1';
+    syn.header.ack='0';
+    syn.header.ack_num = fiabilite_emetteur;
+    //utilisation du ack num pour dialoguer sur le pourcentage de perte
     syn.header.source_port = (pointeur_courant->sock_local).addr.port;
     syn.header.dest_port = (pointeur_courant->addr_distante).port;
     syn.payload.data = NULL; 
     syn.payload.size = 0; 
-    mic_tcp_pdu synack;
+    mic_tcp_pdu synack={0};
     int nb_envois = 0;
-    printf("avant while \n");
     while (i==-1){
         if (nb_envois > nb_envois_max){
             printf("erreur trop d'envois avec échec \n");
             exit(1);
         }
-        printf("avant envoi \n");
         IP_send(syn,addr);
-        printf("apres envoi \n");
         nb_envois ++;
-        i = IP_recv(&synack, &addr, 1000);
-        printf("%d",i);
+        i = IP_recv(&synack, &addr, 100);
         // a vérifier que c'est un synack
+        printf("syn : %c \n", synack.header.syn);
+        printf("ack : %c \n", synack.header.ack);
+        if (!((synack.header.syn=='1')&&(synack.header.ack=='1'))){
+            i=-1;
+        }
     }
-    syn.header.ack = '1';
-    IP_send(syn,addr);
-    */
+    fiabilite_definie = synack.header.ack_num;
+    //la fiabilite est celle négociée
+    printf("fiabilité définie : %d\n", fiabilite_definie);
+    //fin
     (pointeur_courant -> pe_a)=0;
     (pointeur_courant -> sock_local).state = ESTABLISHED;
     return 0;
@@ -249,18 +225,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     header.dest_port = (pointeur_courant->addr_distante).port;
     header.syn = '0';
     header.ack = '0';
-    /*on a les infos du connect
-
-    connect -> dest_port;
-    connect -> addr_dest;
-
-    seq_num; numéro de séquence 
-    ack_num; numéro d'acquittement 
-    syn; flag SYN (valeur 1 si activé et 0 si non) 
-    ack; flag ACK (valeur 1 si activé et 0 si non) 
-    fin; flag FIN (valeur 1 si activé et 0 si non) 
-    */
-    /**/
     mic_tcp_payload payload;
     payload.data = mesg;
     payload.size= mesg_size;
@@ -359,6 +323,29 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     /* ici int fd =0 pour l'instant*/
     liste_sock_addr * pointeur_courant = fd_to_pointeur(0,&liste_socket_addresses);
     mic_tcp_pdu ack={0};
+    ack.header.source_port = pointeur_courant->sock_local.addr.port;
+    ack.header.dest_port = pointeur_courant->addr_distante.port;
+    ack.payload.data = NULL; 
+    ack.payload.size = 0; 
+    printf("syn : %c\n", pdu.header.syn);
+    printf("ack : %c\n", pdu.header.ack);
+    if ((pdu.header.syn=='1')&&(pdu.header.ack=='0')){
+        if (pdu.header.ack_num > fiabilite_recepteur){
+            ack.header.ack_num = fiabilite_recepteur;
+            printf("fiabilite modif : %d \n", ack.header.ack_num);
+            //si la fiabilité emetteur est inférieur a la fiabilite recepteur: ici 95% emetteur, 98% recepteur
+            //alors on défini la fiabilité srr celle du recepteur
+        }
+        else{
+            ack.header.ack_num = pdu.header.ack_num;
+            //Sinon garde la fiabilite de l'emetteur puisque la tolérance de l'émetteur est moins importante que celle du récepteur
+        }
+        ack.header.ack='1';
+        ack.header.syn = '1';
+        IP_send(ack,pointeur_courant->addr_distante);
+        int j = pthread_cond_signal(&etablissement_connexion);
+    }
+    else{
         if ((pointeur_courant->pe_a == pdu.header.seq_num)){
             //c'est bon
             //envoi ACK
@@ -366,10 +353,6 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
             ack.header.ack ='1';
             ack.header.syn = '0';
             ack.header.ack_num = pointeur_courant->pe_a;
-            ack.header.source_port = pointeur_courant->sock_local.addr.port;
-            ack.header.dest_port = pointeur_courant->addr_distante.port;
-            ack.payload.data = NULL; 
-            ack.payload.size = 0; 
             //nouveau pa
             pointeur_courant->pe_a = (1 - (pointeur_courant->pe_a));
             IP_send(ack,pointeur_courant->addr_distante);
@@ -381,10 +364,9 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
                 ack.header.syn = '0';
                 ack.header.ack_num = 1 - (pointeur_courant->pe_a);
                 printf("envoi ancien ack %d\n",ack.header.ack_num);
-                ack.header.source_port = pointeur_courant->sock_local.addr.port;
-                ack.header.dest_port = pointeur_courant->addr_distante.port;
-                ack.payload.data = NULL; 
-                ack.payload.size = 0;
                 IP_send(ack,pointeur_courant->addr_distante);
         }
+    }
 }
+            
+    
