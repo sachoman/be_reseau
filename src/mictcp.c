@@ -2,8 +2,8 @@
 #include <api/mictcp_core.h>
 
 #define nb_envois_max 15
-#define fiabilite_definie 1
-#define index_tab 1000
+#define fiabilite_definie 2
+#define index_tab 10
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct liste_sock_addr{
@@ -18,7 +18,6 @@ typedef struct liste_sock_addr{
 
 
 liste_sock_addr * liste_socket_addresses = NULL;
-
 liste_sock_addr * fd_to_pointeur(int fd,liste_sock_addr ** pointeur_liste_socket){
     liste_sock_addr * pointeur_courant = NULL;
     if  ((*pointeur_liste_socket) == NULL){
@@ -96,7 +95,7 @@ int mic_tcp_socket(start_mode sm)
    if (result ==-1){
        return -1;
    }
-   set_loss_rate(1);
+   set_loss_rate(50);
    if (pthread_mutex_lock(&mutex)){
        printf("erreu lock\n ");
        exit(1);
@@ -162,9 +161,7 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
     synack.header.ack = '1';
     synack.payload.data = NULL;
     synack.payload.size = 0;
-    synack.header.source_port = (pointeur_courant->sock_local).addr.port;
-    synack.header.dest_port = (pointeur_courant->addr_distante).port;
-    mic_tcp_pdu ack;
+    synack.header.source_port) % 3
     i = -1;
     nb_envois = 0;
     while (i==-1){
@@ -271,7 +268,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
     pdu.payload = payload;
     pdu.header = header;
     /**/
-    mic_tcp_pdu ack;
+    mic_tcp_pdu ack={0};
     int nb_envoye;
     int i = -1;
     int j ;
@@ -311,7 +308,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
                 pointeur_courant->tab_pertes[(pointeur_courant->index)]=0;
                 (pointeur_courant->index) =  ((pointeur_courant->index)+1)%index_tab;
                 i=0;
-                (pointeur_courant -> pe_a) = (1+(pointeur_courant -> pe_a)) % 3;
+                (pointeur_courant -> pe_a) = 1-(pointeur_courant -> pe_a);
             }
             else{
                 printf("paquet non attendu recu \n");
@@ -361,7 +358,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
     /* ici int fd =0 pour l'instant*/
     liste_sock_addr * pointeur_courant = fd_to_pointeur(0,&liste_socket_addresses);
-    mic_tcp_pdu ack;
+    mic_tcp_pdu ack={0};
         if ((pointeur_courant->pe_a == pdu.header.seq_num)){
             //c'est bon
             //envoi ACK
@@ -374,38 +371,20 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
             ack.payload.data = NULL; 
             ack.payload.size = 0; 
             //nouveau pa
-            pointeur_courant->pe_a = (1 + (pointeur_courant->pe_a)) % 3;
+            pointeur_courant->pe_a = (1 - (pointeur_courant->pe_a));
             IP_send(ack,pointeur_courant->addr_distante);
             app_buffer_put(pdu.payload);
         }
         else {
-            if ((pointeur_courant->pe_a -1) %3 == pdu.header.seq_num){
                 //envoi de l'ancien pdu
                 ack.header.ack ='1';
                 ack.header.syn = '0';
-                ack.header.ack_num = (pointeur_courant->pe_a - 1)%3;
+                ack.header.ack_num = 1 - (pointeur_courant->pe_a);
                 printf("envoi ancien ack %d\n",ack.header.ack_num);
                 ack.header.source_port = pointeur_courant->sock_local.addr.port;
                 ack.header.dest_port = pointeur_courant->addr_distante.port;
                 ack.payload.data = NULL; 
                 ack.payload.size = 0;
                 IP_send(ack,pointeur_courant->addr_distante);
-            }
-            else {
-                //c'est bon
-            //envoi ACK
-            printf("on SAUTE\n");
-            ack.header.ack ='1';
-            ack.header.syn = '0';
-            ack.header.ack_num = pdu.header.seq_num;
-            ack.header.source_port = pointeur_courant->sock_local.addr.port;
-            ack.header.dest_port = pointeur_courant->addr_distante.port;
-            ack.payload.data = NULL; 
-            ack.payload.size = 0; 
-            //nouveau pa
-            pointeur_courant->pe_a = (2 + (pointeur_courant->pe_a)) % 3;
-            IP_send(ack,pointeur_courant->addr_distante);
-            app_buffer_put(pdu.payload);
-            }
         }
 }

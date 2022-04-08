@@ -136,12 +136,12 @@ int IP_recv(mic_tcp_pdu* pk, mic_tcp_sock_addr* addr, unsigned long timeout)
     /* Create a reception buffer */
     int buffer_size = API_HD_Size + pk->payload.size;
     char *buffer = malloc(buffer_size);
-    printf("fct chelou = %d \n", setsockopt(sys_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)));
+    //printf("fct chelou = %d \n", setsockopt(sys_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)));
     if ((setsockopt(sys_socket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv))) >= 0) {
        result = recvfrom(sys_socket, buffer, buffer_size, 0, (struct sockaddr *)&tmp_addr, &tmp_addr_size);
     }
 
-    printf("IP_recv resulat %d \n", result); 
+    //printf("IP_recv resulat %d \n", result); 
     if (result != -1) {
         /* Create the mic_tcp_pdu */
         memcpy (&(pk->header), buffer, API_HD_Size);
@@ -156,7 +156,7 @@ int IP_recv(mic_tcp_pdu* pk, mic_tcp_sock_addr* addr, unsigned long timeout)
         }
 
         /* Correct the receved size */
-        printf("addr : %s\n ", addr->ip_addr);
+        //printf("addr : %s\n ", addr->ip_addr);
         result -= API_HD_Size;
     }
 
