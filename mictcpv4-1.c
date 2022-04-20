@@ -10,11 +10,7 @@ int fiabilite_definie;
 #define index_tab 100
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-pthread_mutex_t mutex_buffer = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond_buffer = PTHREAD_COND_INITIALIZER;
-
 pthread_cond_t etablissement_connexion;
-#define TAILLE_BUFFER 1000
 
 typedef struct liste_sock_addr{
     mic_tcp_sock sock_local;
@@ -23,9 +19,6 @@ typedef struct liste_sock_addr{
     int fiabilite;
     int tab_pertes[index_tab];
     int index;
-    mic_tcp_payload buffer[TAILLE_BUFFER];
-    int buffer_index;
-    int buffer_remplissage;
     struct liste_sock_addr * suivant;
 }liste_sock_addr;
 
@@ -83,8 +76,6 @@ int add_sock_list(int num, liste_sock_addr ** pointeur_liste_socket){
         for (int i =0; i<index_tab;i++){
             (*pointeur_liste_socket)->tab_pertes[i]=0;
         }
-        (*pointeur_liste_socket)->buffer_index = 0;
-        (*pointeur_liste_socket)->buffer_remplissage = 0;
         ((*pointeur_liste_socket)->sock_local).fd = num;
         ((*pointeur_liste_socket)->sock_local).state = CLOSED;
         (*pointeur_liste_socket)->suivant = NULL;
@@ -110,7 +101,7 @@ int mic_tcp_socket(start_mode sm)
    if (result ==-1){
        return -1;
    }
-   set_loss_rate(0);
+   set_loss_rate(80);
    if (pthread_mutex_lock(&mutex)){
        printf("erreu lock\n ");
        exit(1);
@@ -145,85 +136,6 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
  * Met le socket en état d'acceptation de connexions
  * Retourne 0 si succès, -1 si erreur
  */
-
-void * mic_tcpcheck_send(void * mic_sock){
-    printf("%d \n",*(int *)mic_sock);
-    mic_tcp_payload payload = {0};
-    mic_tcp_pdu pdu = {0};
-    int m;
-    liste_sock_addr * pointeur_courant = fd_to_pointeur(*(int *)mic_sock,&liste_socket_addresses);
-    while(1){
-    if (pointeur_courant->buffer_remplissage > 0){
-        pthread_mutex_lock(&mutex_buffer);
-        pdu.payload = pointeur_courant->buffer[pointeur_courant->buffer_remplissage];
-        pointeur_courant->buffer_remplissage =  pointeur_courant->buffer_remplissage-1;
-        pointeur_courant->buffer_index = (pointeur_courant->buffer_index + 1 )%TAILLE_BUFFER;
-        pthread_mutex_unlock(&mutex_buffer);
-        pthread_cond_broadcast(&cond_buffer);
-        liste_sock_addr * pointeur_courant = fd_to_pointeur(*(int *)mic_sock,&liste_socket_addresses);
-        mic_tcp_header header;
-        if (pointeur_courant == NULL){
-            printf("erreur send\n");
-            exit(-1);
-        }
-        header.source_port = (pointeur_courant->sock_local.addr).port; /* numéro de port source */
-        header.dest_port = (pointeur_courant->addr_distante).port;
-        header.seq_num = (pointeur_courant -> pe_a);
-        header.syn = '0';
-        header.ack = '0';
-        pdu.header = header;
-        //phase d'envoi
-        mic_tcp_pdu ack={0};
-        int nb_envoye;
-        int i = -1;
-        int j ;
-        int nb_envois = 0;
-        while(i==-1){
-            if (nb_envois > nb_envois_max){
-                printf("erreur trop d'envois avec échec \n");
-                exit(-1);
-            }
-            printf("on va envoyer\n");
-            if ((nb_envoye = IP_send(pdu, (pointeur_courant->addr_distante)))==-1){
-                printf("erreur envoi\n");
-                exit(1);
-            }
-            nb_envois++;
-            j = IP_recv(&ack,&(pointeur_courant->addr_distante),80);
-            printf("taille : %d\n", j);
-            //printf("ack 1 ? : %c\n",ack.header.ack);
-            //printf("n0 seq recu : %d\n",ack.header.ack_num);
-            //printf("n0 seq attendu : %d\n",pointeur_courant->pe_a);
-            if (j==-1){
-                if (doit_renvoyer( *(int *)mic_sock)){
-                    printf("limite pertes atteinte, renvoi exigé \n");
-                }
-                else{
-                    printf("paquet perdu on passe au suivant \n");
-                    pointeur_courant->tab_pertes[(pointeur_courant->index)]=1;
-                    (pointeur_courant->index) =  ((pointeur_courant->index)+1)%index_tab;
-                    i=0;
-                }
-            }
-            else{
-                printf("ack 1 ? : %c\n",ack.header.ack);
-                printf("n0 seq recu : %d\n",ack.header.ack_num);
-                printf("n0 seq attendu : %d\n",pointeur_courant->pe_a);
-                if((ack.header.ack == '1')&&(ack.header.ack_num == pointeur_courant->pe_a)){
-                    pointeur_courant->tab_pertes[(pointeur_courant->index)]=0;
-                    (pointeur_courant->index) =  ((pointeur_courant->index)+1)%index_tab;
-                    i=0;
-                    (pointeur_courant -> pe_a) = 1-(pointeur_courant -> pe_a);
-                }
-                else{
-                    printf("paquet non attendu recu \n");
-                }
-            }
-        }
-        printf("modif index \n");
-    }
-    }
-}
 
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
@@ -285,12 +197,11 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
         }
     }
     fiabilite_definie = synack.header.ack_num;
-    //la fiabilite est celle négociéeremplissag
-    (pointeur_courant -> sock_local).state = ESTABLISHED;
+    //la fiabilite est celle négociée
+    printf("fiabilité définie : %d\n", fiabilite_definie);
+    //fin
     (pointeur_courant -> pe_a)=0;
-    //
-    pthread_t tid;
-    pthread_create(&tid, NULL, mic_tcpcheck_send, &(pointeur_courant -> sock_local.fd));
+    (pointeur_courant -> sock_local).state = ESTABLISHED;
     return 0;
 }
 
@@ -301,21 +212,74 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr)
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-   
+    /* create pdu*/
+    mic_tcp_pdu pdu;
+    mic_tcp_header header;
     liste_sock_addr * pointeur_courant = fd_to_pointeur(mic_sock,&liste_socket_addresses);
+    if (pointeur_courant == NULL){
+       printf("erreur send\n");
+       return -1;
+    }
+    header.seq_num = (pointeur_courant -> pe_a);
+    header.source_port = (pointeur_courant->sock_local.addr).port; /* numéro de port source */
+    header.dest_port = (pointeur_courant->addr_distante).port;
+    header.syn = '0';
+    header.ack = '0';
     mic_tcp_payload payload;
     payload.data = mesg;
     payload.size= mesg_size;
-    int tab_index = pointeur_courant->buffer_index;
-    printf("tab index %d \n", tab_index);
-    pthread_mutex_lock(&mutex_buffer);
-    while (pointeur_courant->buffer_remplissage > TAILLE_BUFFER){
-        pthread_cond_wait(&cond_buffer, &mutex_buffer);
+    /**/
+    pdu.payload = payload;
+    pdu.header = header;
+    /**/
+    mic_tcp_pdu ack={0};
+    int nb_envoye;
+    int i = -1;
+    int j ;
+    int nb_envois = 0;
+    while(i==-1){
+        if (nb_envois > nb_envois_max){
+            printf("erreur trop d'envois avec échec \n");
+            exit(-1);
+        }
+        printf("on va envoyer\n");
+        if ((nb_envoye = IP_send(pdu, (pointeur_courant->addr_distante)))==-1){
+            printf("erreur envoi\n");
+            exit(1);
+        }
+        nb_envois++;
+        j = IP_recv(&ack,&(pointeur_courant->addr_distante),80);
+        printf("taille : %d\n", j);
+        /*printf("ack 1 ? : %c\n",ack.header.ack);
+        printf("n0 seq recu : %d\n",ack.header.ack_num);
+        printf("n0 seq attendu : %d\n",pointeur_courant->pe_a);*/
+        if (j==-1){
+            if (doit_renvoyer(mic_sock)){
+                printf("limite pertes atteinte, renvoi exigé \n");
+            }
+            else{
+                printf("paquet perdu on passe au suivant \n");
+                pointeur_courant->tab_pertes[(pointeur_courant->index)]=1;
+                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%index_tab;
+                i=0;
+            }
+        }
+        else{
+            printf("ack 1 ? : %c\n",ack.header.ack);
+            printf("n0 seq recu : %d\n",ack.header.ack_num);
+            printf("n0 seq attendu : %d\n",pointeur_courant->pe_a);
+            if((ack.header.ack == '1')&&(ack.header.ack_num == pointeur_courant->pe_a)){
+                pointeur_courant->tab_pertes[(pointeur_courant->index)]=0;
+                (pointeur_courant->index) =  ((pointeur_courant->index)+1)%index_tab;
+                i=0;
+                (pointeur_courant -> pe_a) = 1-(pointeur_courant -> pe_a);
+            }
+            else{
+                printf("paquet non attendu recu \n");
+            }
+        }
     }
-    pointeur_courant->buffer[(tab_index+pointeur_courant->buffer_remplissage)%TAILLE_BUFFER] = payload;
-    pointeur_courant->buffer_remplissage++;
-    pthread_mutex_unlock(&mutex_buffer);
-    return 0;
+    return nb_envoye;
 }
 
 /*
@@ -332,9 +296,8 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
     payload.size = max_mesg_size;
     int taille_recue;
     taille_recue = app_buffer_get(payload);
-    //taille_recue = app_buffer_get(payload);
-    //printf("t recue : %d \n",taille_recue);
     return taille_recue;
+
 }
 
 /*
@@ -364,9 +327,8 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     ack.header.dest_port = pointeur_courant->addr_distante.port;
     ack.payload.data = NULL; 
     ack.payload.size = 0; 
-    //printf("syn : %c\n", pdu.header.syn);
-    //printf("ack : %c\n", pdu.header.ack);
-    printf("ack num : %d\n", pdu.header.seq_num);
+    printf("syn : %c\n", pdu.header.syn);
+    printf("ack : %c\n", pdu.header.ack);
     if ((pdu.header.syn=='1')&&(pdu.header.ack=='0')){
         if (pdu.header.ack_num > fiabilite_recepteur){
             ack.header.ack_num = fiabilite_recepteur;

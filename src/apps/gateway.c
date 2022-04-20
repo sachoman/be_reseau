@@ -253,7 +253,7 @@ static void file_to_mictcp(char* filename)
             printf("ERROR on MICTCP send\n");
         }
     }
-
+    printf("gateway 2 \n");
     /* Fermeture du socket et du fichier */
     if (mic_tcp_close(sockfd) == -1) {
         printf("ERROR on MICTCP close\n");
@@ -309,13 +309,14 @@ static void mictcp_to_udp(char *host, int port)
             if (nb_read < 0) {
                 printf("ERROR on mic_recv on the MICTCP socket\n");
             }
-            break;      // Fin de la transmission
+            break;    // Fin de la transmission
         }
-
+        
         int nb_sent = sendto(udp_sockfd, buff, nb_read, 0, (struct sockaddr*)&remote_s_addr, sizeof(remote_s_addr));
         ERROR_IF(nb_sent == -1, "Error sendto");
-    }
 
+    }
+    printf("gateway close 2 \n");
     /* Fermeture des sockets */
     if (mic_tcp_close(mictcp_sockfd) == -1) {
         printf("ERROR on MICTCP close\n");
