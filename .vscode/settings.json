@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "mictcp.h": "c"
+        "mictcp.h": "c",
+        "pthread.h": "c"
     }
 }
